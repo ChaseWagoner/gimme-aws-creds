@@ -14,7 +14,7 @@ import configparser
 import os
 from urllib.parse import urlparse
 
-from . import errors, ui, version
+from . import errors, ui, version, input_options
 
 
 class Config(object):
@@ -242,6 +242,7 @@ class Config(object):
             'cred_profile': 'role',
             'okta_username': '',
             'app_url': '',
+            'save_password_in_keyring': input_options.alwaysNeverAsk.Ask,
             'resolve_aws_alias': 'n',
             'include_path': 'n',
             'preferred_mfa_type': '',
@@ -272,6 +273,8 @@ class Config(object):
         elif config_dict['gimme_creds_server'] != 'internal':
             config_dict['client_id'] = self._get_client_id_entry(defaults['client_id'])
             config_dict['okta_auth_server'] = self._get_auth_server_entry(defaults['okta_auth_server'])
+
+        config_dict['save_password_in_keyring'] = self._get_save_password_in_keyring(defaults['save_password_in_keyring'])
 
         config_dict['write_aws_creds'] = self._get_write_aws_creds(defaults['write_aws_creds'])
         if config_dict['gimme_creds_server'] != 'appurl':
@@ -479,6 +482,29 @@ class Config(object):
             "Okta User Name", default_entry)
         return okta_username
 
+    def _get_save_password_in_keyring(self, default_entry):
+        """
+        Determine whether logging in saves the password in the keyring
+        (if the keyring is enabled)
+        """
+
+        ui.default.message(
+            """
+Do you want to save this account's password in the keyring?
+- 'y[es]', 'always': always save password in keyring
+- 'n[o]', 'never':   never save password in keyring
+- 'a[sk]':           ask every time
+            """)
+
+        while True:
+            try:
+                return self._get_user_input_enum(
+                    "Save password in keyring",
+                    input_options.alwaysNeverAsk,
+                    input_options.alwaysNeverAsk.resolve(default_entry, input_options.alwaysNeverAsk.Ask))
+            except ValueError:
+                ui.default.warning("Answer must be 'y[es]', 'n[o]', or 'a[sk]'.")
+
     def _get_aws_default_duration(self, default_entry):
         """Get and validate the aws default session duration. [Optional]"""
         ui.default.message(
@@ -561,6 +587,20 @@ class Config(object):
             return True
         if answer == 'n':
             return False
+
+        raise ValueError('Invalid answer: %s' % answer)
+
+    def _get_user_input_enum(self, message, enum, default):
+        """works like _get_user_input, but either: return value in the enum or
+        raises ValueError"""
+
+        answer = self._get_user_input(message, default.name)
+        answer = answer.lower()
+
+        resolved = enum.resolve(answer)
+
+        if resolved is not None:
+            return resolved.name
 
         raise ValueError('Invalid answer: %s' % answer)
 

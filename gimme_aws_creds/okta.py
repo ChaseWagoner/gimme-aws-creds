@@ -32,7 +32,7 @@ from requests.adapters import HTTPAdapter, Retry
 
 from gimme_aws_creds.u2f import FactorU2F
 from gimme_aws_creds.webauthn import WebAuthnClient, FakeAssertion
-from . import errors, ui, version, duo
+from . import errors, ui, version, duo, input_options
 from .errors import GimmeAWSCredsMFAEnrollStatus
 from .registered_authenticators import RegisteredAuthenticators
 
@@ -47,15 +47,19 @@ class OktaClient(object):
     KEYRING_SERVICE = 'gimme-aws-creds'
     KEYRING_ENABLED = not isinstance(keyring.get_keyring(), FailKeyring)
 
-    def __init__(self, gac_ui, okta_org_url, verify_ssl_certs=True, device_token=None):
+    def __init__(self, gac_ui, okta_org_url, verify_ssl_certs=True, device_token=None, save_password=input_options.alwaysNeverAsk.Ask):
         """
         :type gac_ui: ui.UserInterface
         :param okta_org_url: Base URL string for Okta IDP.
         :param verify_ssl_certs: Enable/disable SSL verification
+        :type save_password: input_options.YesNoAskEnum
+        :param save_password: YesNoEnum determining whether to offer to save passwords in the keyring.
         """
         self.ui = gac_ui
         self._okta_org_url = okta_org_url
         self._verify_ssl_certs = verify_ssl_certs
+        self._use_keyring = self.KEYRING_ENABLED and save_password in [input_options.alwaysNeverAsk.Always, input_options.alwaysNeverAsk.Ask]
+        self._ask_keyring = self._use_keyring and save_password == input_options.alwaysNeverAsk.Ask
 
         if verify_ssl_certs is False:
             requests.packages.urllib3.disable_warnings()
@@ -351,7 +355,7 @@ class OktaClient(object):
         # ref: https://developer.okta.com/docs/reference/error-codes/#example-errors-listed-by-http-return-code
         elif response.status_code in [400, 401, 403, 404, 409, 429, 500, 501, 503]:
             if response_data['errorCode'] == "E0000004":
-                if self.KEYRING_ENABLED:
+                if self._use_keyring:
                     try:
                         self.ui.info("Stored password is invalid, clearing.  Please try again")
                         keyring.delete_password(self.KEYRING_SERVICE, self._keyring_username)
@@ -870,7 +874,7 @@ class OktaClient(object):
         username = self._username
 
         password = self._password
-        if not password and self.KEYRING_ENABLED:
+        if not password and self._use_keyring:
             try:
                 # If the OS supports a keyring, offer to save the password
                 password = keyring.get_password(self.KEYRING_SERVICE, self._keyring_username)
@@ -886,9 +890,11 @@ class OktaClient(object):
                 if len(password) > 0:
                     break
 
-            if self.KEYRING_ENABLED:
-                # If the OS supports a keyring, offer to save the password
-                if self.ui.input("Do you want to save this password in the keyring? (y/N) ") == 'y':
+            if self._use_keyring:
+                # Save the password in the keyring.
+                # If configured to ask each time, offer to save it.
+                # If configured to save unconditionally, save it without offering.
+                if (not self._ask_keyring) or (self.ui.input("Do you want to save this password in the keyring? (y/N) ") == 'y'):
                     try:
                         keyring.set_password(self.KEYRING_SERVICE, self._keyring_username, password)
                         self.ui.info("Password for {} saved in keyring.".format(username))

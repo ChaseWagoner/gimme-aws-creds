@@ -25,7 +25,7 @@ from okta.framework.ApiClient import ApiClient
 from okta.framework.OktaError import OktaError
 
 # local imports
-from . import errors, ui
+from . import errors, ui, input_options
 from .aws import AwsResolver
 from .config import Config
 from .default import DefaultResolver
@@ -527,6 +527,11 @@ class GimmeAWSCreds(object):
         return ret
 
     @property
+    def save_password(self):
+        save_password_conf = self.conf_dict.get('save_password_in_keyring')
+        return input_options.alwaysNeverAsk.resolve(save_password_conf, input_options.alwaysNeverAsk.Ask)
+
+    @property
     def okta(self):
         if 'okta' in self._cache:
             return self._cache['okta']
@@ -536,6 +541,7 @@ class GimmeAWSCreds(object):
             self.okta_org_url,
             self.config.verify_ssl_certs,
             self.device_token,
+            save_password=self.save_password
         )
 
         if self.config.username is not None:
